@@ -8,7 +8,6 @@ export interface BulletAnalysis {
   hasAction: boolean;    // Z: strong active verb
   xyzScore: number;      // 0–3
   issues: string[];
-  suggestion?: string;
 }
 
 export interface SectionAnalysis {
@@ -19,13 +18,13 @@ export interface SectionAnalysis {
 }
 
 export interface ScannabilityAnalysis {
-  summaryLength: number;        // sentence count
-  summaryOk: boolean;           // 3–5 sentences
+  summaryLength: number;
+  summaryOk: boolean;
   estimatedPageCount: number;
   pageCountOk: boolean;
   criticalKeywordsFound: string[];
   criticalKeywordsMissing: string[];
-  score: number;                // 0–100
+  score: number;
 }
 
 export interface SpellingIssue {
@@ -34,44 +33,189 @@ export interface SpellingIssue {
   suggestions: string[];
 }
 
+export interface AIWritingFlag {
+  type: 'word' | 'phrase' | 'structure';
+  match: string;
+  reason: string;
+  context?: string;
+}
+
 export interface LocalScoreResult {
-  overallScore: number;         // 0–100
-  xyzScore: number;             // 0–100
-  metricDensityScore: number;   // 0–100
-  scannabilityScore: number;    // 0–100
-  formattingScore: number;      // 0–100
+  overallScore: number;
+  xyzScore: number;
+  metricDensityScore: number;
+  scannabilityScore: number;
+  formattingScore: number;
+  aiWritingScore: number;        // 0–100 (100 = human, 0 = pure AI)
   sections: SectionAnalysis[];
   scannability: ScannabilityAnalysis;
   spellingIssues: SpellingIssue[];
-  aiTropeFlags: string[];
+  aiTropeFlags: string[];        // legacy: simple word list
+  aiWritingFlags: AIWritingFlag[]; // new: detailed flags with reason
   summary: string;
 }
 
-// --- Constants ---
-const AI_BANNED_WORDS = [
-  'delve', 'tapestry', 'multifaceted', 'pioneering', 'unlock', 'leverage',
-  'synergy', 'bespoke', 'transformative', 'robust', 'holistic', 'seamless',
-  'cutting-edge', 'game-changing', 'thought leader', 'ecosystem', 'paradigm',
-  'ideate', 'ideation', 'learnings', 'impactful', 'circle back', 'deep dive',
-  'move the needle', 'boil the ocean', 'actionable insights', 'bandwidth',
-  'low-hanging fruit', 'value-add', 'bleeding edge',
+// ---------------------------------------------------------------------------
+// VOCABULARY — banned words (expanded from Wikipedia Signs of AI Writing)
+// ---------------------------------------------------------------------------
+
+// Tier 1: Never acceptable in a resume
+const AI_BANNED_TIER1 = [
+  'delve', 'tapestry', 'multifaceted', 'pioneering', 'bespoke',
+  'synergy', 'ideate', 'ideation', 'paradigm shift', 'thought leader',
+  'boil the ocean', 'move the needle', 'circle back', 'actionable insights',
+  'low-hanging fruit', 'bleeding edge', 'game-changing', 'deep dive',
+  'learnings', 'ecosystem', 'unlock', 'bandwidth',
 ];
 
+// Tier 2: AI signals that weaken a Director-level resume
+const AI_BANNED_TIER2 = [
+  // Inflated significance words (Wikipedia list)
+  'crucial', 'pivotal', 'vital', 'transformative', 'groundbreaking', 'renowned',
+  'meticulous', 'meticulously', 'intricate', 'intricacies', 'interplay',
+  'testament', 'indelible', 'enduring', 'vibrant', 'profound', 'noteworthy',
+  // Promotional/marketing tone
+  'boasts', 'showcasing', 'leveraging', 'robust', 'holistic', 'seamless',
+  'cutting-edge', 'impactful', 'value-add', 'best-in-class', 'world-class',
+  // Copula avoidance words (AI uses these to avoid "is/was")
+  'serves as', 'stands as', 'acts as', 'functions as',
+  // Corporate filler
+  'synergistic', 'paradigm', 'leverage', 'bespoke', 'scalable solutions',
+  'thought leadership', 'passion for', 'passionate about',
+  // Garner (classic AI tell)
+  'garner', 'garnered',
+  // Fostering/cultivating cluster
+  'fostering', 'cultivating', 'championing', 'spearheading initiatives',
+  // Landscape / evolving landscape
+  'evolving landscape', 'dynamic landscape', 'rapidly evolving',
+  // Align/resonate cluster
+  'align with', 'resonates with', 'aligns perfectly',
+];
+
+// Tier 3: Elegant variation — AI synonyms for "I" or the person
+const AI_ELEGANT_VARIATION = [
+  'seasoned professional', 'accomplished executive', 'dynamic leader',
+  'results-driven', 'results-oriented', 'proven track record',
+  'dedicated professional', 'innovative thinker', 'strategic visionary',
+  'consummate professional', 'forward-thinking', 'detail-oriented',
+];
+
+// ---------------------------------------------------------------------------
+// STRUCTURAL PATTERNS (regex-based)
+// ---------------------------------------------------------------------------
+
+interface StructuralPattern {
+  pattern: RegExp;
+  label: string;
+  reason: string;
+}
+
+const AI_STRUCTURAL_PATTERNS: StructuralPattern[] = [
+  // "Not just X, but also Y" — AI favorite false dichotomy
+  {
+    pattern: /not just .{3,40}, but (also )?/i,
+    label: '"Not just X, but also Y"',
+    reason: 'Classic AI contrast construction. Replace with a direct claim.',
+  },
+  // Rule of three adjective triads — "innovative, dynamic, and results-driven"
+  {
+    pattern: /\b\w+,\s+\w+,?\s+and\s+\w+\b(?=\s+(professional|leader|executive|manager|individual))/i,
+    label: 'Adjective triad before title',
+    reason: 'AI overuses adjective triplets before nouns. Pick one or use none.',
+  },
+  // Hanging -ing clauses at end of bullet ("...ensuring success", "...highlighting impact")
+  {
+    pattern: /,\s+(ensuring|highlighting|underscoring|demonstrating|reflecting|showcasing|emphasizing|fostering|cultivating|contributing to)\s+\w/i,
+    label: 'Hanging -ing clause',
+    reason: 'AI attaches floating -ing phrases to pad sentences. Cut or rephrase as a direct result.',
+  },
+  // "Committed to" opener
+  {
+    pattern: /^committed to\b/i,
+    label: '"Committed to" opener',
+    reason: 'Vague intent statement. Lead with what you actually did.',
+  },
+  // "Passionate about" opener
+  {
+    pattern: /\bpassionate about\b/i,
+    label: '"Passionate about"',
+    reason: 'Signals soft language over hard evidence. Replace with a result.',
+  },
+  // Excessive em-dash usage (more than 2 in a single bullet)
+  {
+    pattern: /([—–].*){3,}/,
+    label: 'Em-dash overuse',
+    reason: 'AI uses em-dashes as a tic. Rewrite as clean sentences.',
+  },
+  // "In order to" — AI verbosity
+  {
+    pattern: /\bin order to\b/i,
+    label: '"In order to"',
+    reason: 'Verbose. Replace with "to".',
+  },
+  // "A wide range of" / "a variety of" — AI padding
+  {
+    pattern: /\b(a wide range of|a variety of|numerous|various)\b/i,
+    label: 'Vague quantity phrase',
+    reason: 'Replace with an actual number.',
+  },
+  // "Successfully" — redundant qualifier
+  {
+    pattern: /\bsuccessfully\b/i,
+    label: '"Successfully"',
+    reason: 'Redundant. If you did it, it was successful. Remove.',
+  },
+  // "Responsible for" opener — passive construction
+  {
+    pattern: /^responsible for\b/i,
+    label: '"Responsible for" opener',
+    reason: 'Passive framing. Start with the verb instead.',
+  },
+  // "Helped to" — dilutes ownership
+  {
+    pattern: /\bhelped to\b/i,
+    label: '"Helped to"',
+    reason: 'Obscures your direct contribution. Own the action.',
+  },
+  // "Worked with" opener — vague
+  {
+    pattern: /^worked with\b/i,
+    label: '"Worked with" opener',
+    reason: 'Too vague. What was your role? Replace with what you directed, built, or delivered.',
+  },
+  // "Utilized" / "utilized" — AI prefers "utilized" over "used"
+  {
+    pattern: /\butilized?\b/i,
+    label: '"Utilized"',
+    reason: '"Used" is cleaner. "Utilized" is corporate filler.',
+  },
+  // "Instrumental in" — passive indirect phrasing
+  {
+    pattern: /\binstrumental in\b/i,
+    label: '"Instrumental in"',
+    reason: 'Indirect. Say what you did, not that you were "instrumental" in it.',
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Active verb check
+// ---------------------------------------------------------------------------
 const STRONG_ACTIVE_VERBS = [
   /^directed/i, /^engineered/i, /^scaled/i, /^produced/i, /^built/i,
   /^led/i, /^launched/i, /^negotiated/i, /^drove/i, /^delivered/i,
   /^managed/i, /^created/i, /^developed/i, /^designed/i, /^implemented/i,
   /^generated/i, /^increased/i, /^reduced/i, /^saved/i, /^grew/i,
-  /^spearheaded/i, /^oversaw/i, /^partnered/i, /^executed/i, /^secured/i,
-  /^closed/i, /^won/i, /^authored/i, /^architected/i, /^transformed/i,
+  /^oversaw/i, /^partnered/i, /^executed/i, /^secured/i,
+  /^closed/i, /^won/i, /^authored/i, /^architected/i,
   /^streamlined/i, /^restructured/i, /^expanded/i, /^accelerated/i,
+  /^established/i, /^recruited/i, /^trained/i, /^coached/i,
+  /^transformed/i, /^consolidated/i, /^deployed/i, /^migrated/i,
+  /^renegotiated/i, /^acquired/i, /^divested/i, /^integrated/i,
 ];
 
 const METRIC_PATTERN = /(\$[\d,.]+[MBKmkb]?|\d+[\d,.]*\s*%|[\d,.]+[x]|\d+[\d,.]*\s*(million|billion|thousand|M|B|K|mm)|\d+\+?\s*(clients?|accounts?|campaigns?|markets?|brands?|deals?))/i;
+const RESULT_PATTERN = /(result|saving|increased|grew|reduced|improved|achieved|delivered|generated|produced|drove|returned|gained|cut|eliminated|boosted|surpass|exceeded|outperform)/i;
 
-const RESULT_PATTERN = /(result|saving|saving|increased|grew|reduced|improved|achieved|delivered|generated|produced|drove|returned|gained|cut|eliminated|boosted|surpass|exceeded|outperform)/i;
-
-// Rough character-per-page estimate for a standard resume layout
 const CHARS_PER_PAGE = 3200;
 
 const CRITICAL_KEYWORDS = [
@@ -79,7 +223,9 @@ const CRITICAL_KEYWORDS = [
   'NBCUniversal', 'Media', 'Ad Tech', 'Programmatic', 'CTV',
 ];
 
-// --- Main scoring function ---
+// ---------------------------------------------------------------------------
+// Main scoring function
+// ---------------------------------------------------------------------------
 export function scoreResume(text: string): LocalScoreResult {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const sections = parseSections(lines);
@@ -87,32 +233,27 @@ export function scoreResume(text: string): LocalScoreResult {
   const bulletAnalyses = sections.flatMap(s => s.bullets);
   const totalBullets = bulletAnalyses.length;
 
-  // XYZ Score
   const xyzPassing = bulletAnalyses.filter(b => b.xyzScore >= 2).length;
   const xyzScore = totalBullets > 0 ? Math.round((xyzPassing / totalBullets) * 100) : 0;
 
-  // Metric Density Score
   const bulletsWithMetrics = bulletAnalyses.filter(b => b.hasMetric).length;
   const metricDensityScore = totalBullets > 0 ? Math.round((bulletsWithMetrics / totalBullets) * 100) : 0;
 
-  // Scannability
   const scannability = analyzeScannability(text, lines);
-
-  // Spelling issues (common resume errors)
   const spellingIssues = checkCommonErrors(text);
+  const { flags: aiWritingFlags, score: aiWritingScore } = detectAIWriting(text, lines);
 
-  // AI tropes
-  const aiTropeFlags = detectAITropes(text);
+  // Legacy simple list for backward compat
+  const aiTropeFlags = aiWritingFlags.filter(f => f.type === 'word').map(f => f.match);
 
-  // Formatting score (heuristic based on structure)
   const formattingScore = calcFormattingScore(text, lines, scannability);
 
-  // Overall weighted score
   const overallScore = Math.round(
-    xyzScore * 0.35 +
+    xyzScore * 0.30 +
     metricDensityScore * 0.25 +
-    scannability.score * 0.25 +
-    formattingScore * 0.15
+    scannability.score * 0.20 +
+    formattingScore * 0.10 +
+    aiWritingScore * 0.15
   );
 
   return {
@@ -121,13 +262,19 @@ export function scoreResume(text: string): LocalScoreResult {
     metricDensityScore,
     scannabilityScore: scannability.score,
     formattingScore,
+    aiWritingScore,
     sections,
     scannability,
     spellingIssues,
     aiTropeFlags,
-    summary: buildSummary(overallScore, xyzScore, metricDensityScore, scannability, aiTropeFlags),
+    aiWritingFlags,
+    summary: buildSummary(overallScore, xyzScore, metricDensityScore, scannability, aiWritingFlags),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function parseSections(lines: string[]): SectionAnalysis[] {
   const sections: SectionAnalysis[] = [];
@@ -143,29 +290,22 @@ function parseSections(lines: string[]): SectionAnalysis[] {
       const cleanLine = line.replace(/^[•\-\*\u2022]\s*/, '');
       currentSection.bullets.push(analyzeBullet(cleanLine));
     } else if (currentSection && line.match(/^[A-Z][^.!?]*[.!?]?$/) && line.length > 30 && line.length < 200) {
-      // Sentence that looks like a bullet without a symbol
       currentSection.bullets.push(analyzeBullet(line));
     }
   }
 
   if (currentSection) sections.push(currentSection);
 
-  // Calculate density per section
   return sections.map(s => {
     const bulletCount = s.bullets.length;
     const withMetrics = s.bullets.filter(b => b.hasMetric).length;
     const metricDensity = bulletCount > 0 ? withMetrics / bulletCount : 0;
-    return {
-      ...s,
-      metricDensity,
-      densityFlag: bulletCount >= 5 && metricDensity < 0.7,
-    };
+    return { ...s, metricDensity, densityFlag: bulletCount >= 5 && metricDensity < 0.7 };
   });
 }
 
 function analyzeBullet(text: string): BulletAnalysis {
   const issues: string[] = [];
-
   const hasMetric = METRIC_PATTERN.test(text);
   const hasResult = RESULT_PATTERN.test(text) || hasMetric;
   const hasAction = STRONG_ACTIVE_VERBS.some(r => r.test(text));
@@ -175,12 +315,10 @@ function analyzeBullet(text: string): BulletAnalysis {
   if (!hasResult) issues.push('Clarify the business result or impact');
 
   const xyzScore = [hasResult, hasMetric, hasAction].filter(Boolean).length;
-
   return { text, hasResult, hasMetric, hasAction, xyzScore, issues };
 }
 
-function analyzeScannability(text: string, lines: string[]): ScannabilityAnalysis {
-  // Find summary block (first ~5 sentences after name)
+function analyzeScannability(text: string, _lines: string[]): ScannabilityAnalysis {
   const summaryMatch = text.match(/SUMMARY|OBJECTIVE|PROFILE/i);
   let summaryText = '';
   if (summaryMatch) {
@@ -193,20 +331,12 @@ function analyzeScannability(text: string, lines: string[]): ScannabilityAnalysi
   const sentences = summaryText.split(/[.!?]+/).filter(s => s.trim().length > 10);
   const summaryLength = sentences.length;
   const summaryOk = summaryLength >= 3 && summaryLength <= 5;
-
-  // Estimate pages
   const estimatedPageCount = Math.max(1, Math.round(text.length / CHARS_PER_PAGE));
   const pageCountOk = estimatedPageCount <= 2;
 
-  // Critical keywords
-  const criticalKeywordsFound = CRITICAL_KEYWORDS.filter(kw =>
-    new RegExp(kw, 'i').test(text)
-  );
-  const criticalKeywordsMissing = CRITICAL_KEYWORDS.filter(kw =>
-    !new RegExp(kw, 'i').test(text)
-  );
+  const criticalKeywordsFound = CRITICAL_KEYWORDS.filter(kw => new RegExp(kw, 'i').test(text));
+  const criticalKeywordsMissing = CRITICAL_KEYWORDS.filter(kw => !new RegExp(kw, 'i').test(text));
 
-  // Scannability score
   let score = 60;
   if (summaryOk) score += 15;
   else if (summaryLength < 3) score -= 10;
@@ -215,84 +345,123 @@ function analyzeScannability(text: string, lines: string[]): ScannabilityAnalysi
   else score -= 20;
   score += Math.min(10, criticalKeywordsFound.length * 2);
 
-  return {
-    summaryLength,
-    summaryOk,
-    estimatedPageCount,
-    pageCountOk,
-    criticalKeywordsFound,
-    criticalKeywordsMissing,
-    score: Math.max(0, Math.min(100, score)),
-  };
+  return { summaryLength, summaryOk, estimatedPageCount, pageCountOk, criticalKeywordsFound, criticalKeywordsMissing, score: Math.max(0, Math.min(100, score)) };
+}
+
+function detectAIWriting(text: string, lines: string[]): { flags: AIWritingFlag[]; score: number } {
+  const flags: AIWritingFlag[] = [];
+  const lower = text.toLowerCase();
+
+  // Tier 1 — hard bans
+  for (const word of AI_BANNED_TIER1) {
+    if (lower.includes(word.toLowerCase())) {
+      const ctx = extractContext(text, word);
+      flags.push({ type: 'word', match: word, reason: 'Tier 1 AI trope — immediately flags automated writing.', context: ctx });
+    }
+  }
+
+  // Tier 2 — strong signals
+  for (const word of AI_BANNED_TIER2) {
+    if (lower.includes(word.toLowerCase())) {
+      const ctx = extractContext(text, word);
+      flags.push({ type: 'phrase', match: word, reason: 'Common AI vocabulary — weakens Director-level credibility.', context: ctx });
+    }
+  }
+
+  // Tier 3 — elegant variation
+  for (const phrase of AI_ELEGANT_VARIATION) {
+    if (lower.includes(phrase.toLowerCase())) {
+      const ctx = extractContext(text, phrase);
+      flags.push({ type: 'phrase', match: phrase, reason: 'AI synonym for "I" or the person — replace with specific achievements.', context: ctx });
+    }
+  }
+
+  // Structural patterns — run on each line/bullet
+  const allLines = lines.concat([text]); // also check full text for multi-line patterns
+  for (const line of lines) {
+    for (const sp of AI_STRUCTURAL_PATTERNS) {
+      if (sp.pattern.test(line)) {
+        flags.push({ type: 'structure', match: sp.label, reason: sp.reason, context: line.slice(0, 80) });
+      }
+    }
+  }
+  // Also check full text for em-dash overuse across the whole document
+  const emDashCount = (text.match(/[—–]/g) ?? []).length;
+  if (emDashCount > 6) {
+    flags.push({ type: 'structure', match: `Em-dash count: ${emDashCount}`, reason: 'AI uses em-dashes as a stylistic tic. More than 6 in a resume is a signal.', });
+  }
+
+  // Passive voice detection (simple heuristic: "was [verb]ed by", "were [verb]ed")
+  const passiveMatches = text.match(/\b(was|were|been|is|are)\s+\w+ed\b/gi) ?? [];
+  if (passiveMatches.length > 3) {
+    flags.push({ type: 'structure', match: `Passive voice: ${passiveMatches.length} instances`, reason: 'Passive constructions dilute ownership. Rewrite with active verbs.' });
+  }
+
+  // Dedup flags by match
+  const seen = new Set<string>();
+  const deduped = flags.filter(f => {
+    const key = f.match.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  // Score: start at 100, penalise per flag
+  const penalty = deduped.reduce((acc, f) => {
+    if (f.type === 'word') return acc + 8;         // tier 1: hard hit
+    if (f.type === 'phrase') return acc + 4;        // tier 2/3: moderate
+    if (f.type === 'structure') return acc + 6;     // structural: meaningful
+    return acc;
+  }, 0);
+
+  return { flags: deduped, score: Math.max(0, Math.min(100, 100 - penalty)) };
+}
+
+function extractContext(text: string, phrase: string): string {
+  const idx = text.toLowerCase().indexOf(phrase.toLowerCase());
+  if (idx === -1) return '';
+  const start = Math.max(0, idx - 25);
+  const end = Math.min(text.length, idx + phrase.length + 25);
+  return '...' + text.slice(start, end).trim() + '...';
 }
 
 function checkCommonErrors(text: string): SpellingIssue[] {
   const issues: SpellingIssue[] = [];
-
   const commonErrors: Record<string, string[]> = {
     'recieve': ['receive'],
     'acheive': ['achieve'],
     'managment': ['management'],
     'experiance': ['experience'],
     'leadrship': ['leadership'],
-    'develope': ['develop'],
     'developement': ['development'],
     'stratagey': ['strategy'],
-    'straegy': ['strategy'],
-    'srategy': ['strategy'],
     'negociate': ['negotiate'],
     'negociation': ['negotiation'],
     'buisness': ['business'],
     'departement': ['department'],
     'implmented': ['implemented'],
-    'partnered with': [], // check for passive construction
     'responsable': ['responsible'],
     'profesional': ['professional'],
+    'occured': ['occurred'],
+    'seperate': ['separate'],
+    'accomodate': ['accommodate'],
   };
-
   for (const [typo, suggestions] of Object.entries(commonErrors)) {
-    const regex = new RegExp(`\\b${typo}\\b`, 'gi');
-    const matches = text.match(regex);
-    if (matches) {
-      const contextMatch = text.match(new RegExp(`.{0,30}${typo}.{0,30}`, 'gi'));
-      issues.push({
-        word: typo,
-        context: contextMatch?.[0] ?? typo,
-        suggestions,
-      });
+    if (new RegExp(`\\b${typo}\\b`, 'gi').test(text)) {
+      const ctxMatch = text.match(new RegExp(`.{0,30}${typo}.{0,30}`, 'gi'));
+      issues.push({ word: typo, context: ctxMatch?.[0] ?? typo, suggestions });
     }
   }
-
   return issues;
-}
-
-function detectAITropes(text: string): string[] {
-  const found: string[] = [];
-  const lower = text.toLowerCase();
-  for (const word of AI_BANNED_WORDS) {
-    if (lower.includes(word.toLowerCase())) {
-      found.push(word);
-    }
-  }
-  return found;
 }
 
 function calcFormattingScore(text: string, lines: string[], scannability: ScannabilityAnalysis): number {
   let score = 70;
-
-  // Check for dates (good formatting)
   if (/\d{4}\s*[–\-]\s*(\d{4}|present)/i.test(text)) score += 10;
-
-  // Check for consistent bullet usage
   const bulletLines = lines.filter(l => /^[•\-\*\u2022]/.test(l));
   if (bulletLines.length > 3) score += 10;
-
-  // Page count penalty
   if (!scannability.pageCountOk) score -= 20;
-
-  // Penalty for very short resume
   if (text.length < 1000) score -= 20;
-
   return Math.max(0, Math.min(100, score));
 }
 
@@ -301,7 +470,7 @@ function buildSummary(
   xyz: number,
   density: number,
   scannability: ScannabilityAnalysis,
-  aiFlags: string[]
+  aiFlags: AIWritingFlag[]
 ): string {
   const parts: string[] = [];
 
@@ -313,7 +482,12 @@ function buildSummary(
   if (density < 70) parts.push('Metric density is below the 7/10 threshold — add numbers.');
   if (!scannability.summaryOk) parts.push(`Summary is ${scannability.summaryLength} sentences — target 3–5.`);
   if (!scannability.pageCountOk) parts.push(`Estimated ${scannability.estimatedPageCount} pages — trim to 2 for Director level.`);
-  if (aiFlags.length > 0) parts.push(`AI tropes detected: ${aiFlags.slice(0, 3).join(', ')}.`);
+
+  const wordFlags = aiFlags.filter(f => f.type === 'word' || f.type === 'phrase').slice(0, 3);
+  const structFlags = aiFlags.filter(f => f.type === 'structure').slice(0, 2);
+
+  if (wordFlags.length > 0) parts.push(`AI vocabulary detected: ${wordFlags.map(f => f.match).join(', ')}.`);
+  if (structFlags.length > 0) parts.push(`Structural AI tells: ${structFlags.map(f => f.match).join('; ')}.`);
 
   return parts.join(' ');
 }
