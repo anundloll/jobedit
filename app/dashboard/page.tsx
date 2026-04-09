@@ -8,20 +8,32 @@ import InterviewGuide from '@/components/InterviewGuide';
 import PitchGenerator from '@/components/PitchGenerator';
 import type { LocalScoreResult } from '@/lib/scoring';
 import type { JDMatchResult, BulletSuggestion, InterviewGuide as GuideType, TMayPitch } from '@/lib/claude';
-import { FileText, Target, MessageSquare, Mic, AlertCircle, Zap } from 'lucide-react';
+import { FileText, Target, MessageSquare, Mic, AlertCircle, Zap, CheckCircle2, Circle } from 'lucide-react';
 
 type Tab = 'score' | 'bullets' | 'interview' | 'pitch';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: 'score', label: 'Score', icon: <Zap size={13} /> },
-  { id: 'bullets', label: 'Bullets', icon: <FileText size={13} /> },
-  { id: 'interview', label: 'Interview', icon: <MessageSquare size={13} /> },
-  { id: 'pitch', label: 'Pitch', icon: <Mic size={13} /> },
+  { id: 'score', label: 'Score', icon: <Zap size={12} /> },
+  { id: 'bullets', label: 'Bullets', icon: <FileText size={12} /> },
+  { id: 'interview', label: 'Interview', icon: <MessageSquare size={12} /> },
+  { id: 'pitch', label: 'Pitch', icon: <Mic size={12} /> },
 ];
+
+const SECTION_LABEL: React.CSSProperties = {
+  fontSize: 10,
+  color: 'var(--text-muted)',
+  textTransform: 'uppercase',
+  letterSpacing: '0.12em',
+  marginBottom: 10,
+  paddingLeft: 8,
+  borderLeft: '2px solid var(--border)',
+  lineHeight: 1,
+};
 
 export default function Dashboard() {
   const [resumeText, setResumeText] = useState('');
   const [resumeFileName, setResumeFileName] = useState('');
+  const [pasteMode, setPasteMode] = useState(false);
   const [jobDescription, setJobDescription] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [companyName, setCompanyName] = useState('');
@@ -43,6 +55,7 @@ export default function Dashboard() {
   const handleTextExtracted = useCallback((text: string, fileName: string) => {
     setResumeText(text);
     setResumeFileName(fileName);
+    setPasteMode(false);
     setLocalScore(null);
     setJdMatch(null);
     setBulletSuggestions(null);
@@ -131,9 +144,9 @@ export default function Dashboard() {
     }
   };
 
-  const inputStyle = {
+  const inputStyle: React.CSSProperties = {
     width: '100%',
-    background: '#111',
+    background: 'var(--surface)',
     border: '1px solid var(--border)',
     borderRadius: 4,
     padding: '8px 10px',
@@ -141,221 +154,253 @@ export default function Dashboard() {
     fontSize: 12,
     fontFamily: 'inherit',
     outline: 'none',
+    transition: 'border-color 0.15s ease',
   };
 
   const hasResults = localScore !== null;
+  const canAnalyze = !!resumeText && !analyzing;
+
+  const steps = [
+    { label: 'Add resume', done: !!resumeText },
+    { label: 'Add job title + description', done: !!(jobTitle && jobDescription) },
+    { label: 'Run analysis', done: hasResults },
+  ];
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Top nav */}
       <header style={{
         borderBottom: '1px solid var(--border)',
-        padding: '0 24px',
-        height: 48,
+        padding: '0 20px',
+        height: 44,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         flexShrink: 0,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Target size={16} color="var(--accent)" />
-          <span style={{ fontWeight: 700, fontSize: 13, letterSpacing: '0.05em' }}>JOBEDIT</span>
-          <span style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.1em' }}>.DEV</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Target size={14} color="var(--accent)" />
+          <span style={{ fontWeight: 700, fontSize: 12, letterSpacing: '0.08em' }}>JOBEDIT</span>
+          <span style={{ fontSize: 9, color: 'var(--text-muted)', letterSpacing: '0.12em' }}>.DEV</span>
         </div>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.08em' }}>
-          DIRECTOR-LEVEL RESUME INTELLIGENCE
-        </span>
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+          {steps.map((s, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              {s.done
+                ? <CheckCircle2 size={11} color="var(--green)" />
+                : <Circle size={11} color="var(--border)" />
+              }
+              <span style={{ fontSize: 10, color: s.done ? 'var(--text-dim)' : 'var(--text-muted)', letterSpacing: '0.04em' }}>
+                {s.label}
+              </span>
+            </div>
+          ))}
+        </div>
       </header>
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* Left panel — inputs */}
         <aside style={{
-          width: 320,
+          width: 248,
           borderRight: '1px solid var(--border)',
-          padding: 20,
           display: 'flex',
           flexDirection: 'column',
-          gap: 16,
-          overflowY: 'auto',
           flexShrink: 0,
+          overflow: 'hidden',
         }}>
-          <div>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
-              Resume
-            </div>
-            <ResumeUpload
-              onTextExtracted={handleTextExtracted}
-              fileName={resumeFileName}
-              hasResume={!!resumeText}
-              onClear={() => { setResumeText(''); setResumeFileName(''); setLocalScore(null); setJdMatch(null); }}
-            />
-            {resumeText && !resumeFileName && (
-              <div style={{ marginTop: 8 }}>
-                <textarea
-                  style={{ ...inputStyle, height: 120, resize: 'vertical', fontSize: 11 }}
-                  value={resumeText}
-                  onChange={e => setResumeText(e.target.value)}
-                  placeholder="Or paste resume text here..."
-                />
-              </div>
-            )}
-            {!resumeText && (
-              <div style={{ marginTop: 8 }}>
-                <textarea
-                  style={{ ...inputStyle, height: 100, resize: 'vertical', fontSize: 11 }}
-                  value={resumeText}
-                  onChange={e => setResumeText(e.target.value)}
-                  placeholder="Or paste resume text directly..."
-                />
-              </div>
-            )}
-          </div>
-
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
-              Job Target
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <input
-                style={inputStyle}
-                value={jobTitle}
-                onChange={e => setJobTitle(e.target.value)}
-                placeholder="Job title (e.g. VP of Media Sales)"
-              />
-              <input
-                style={inputStyle}
-                value={companyName}
-                onChange={e => setCompanyName(e.target.value)}
-                placeholder="Company name"
-              />
-              <textarea
-                style={{ ...inputStyle, height: 120, resize: 'vertical' }}
-                value={jobDescription}
-                onChange={e => setJobDescription(e.target.value)}
-                placeholder="Paste job description here (optional — enables JD match scoring)"
-              />
-            </div>
-          </div>
-
-          <button
-            onClick={handleAnalyze}
-            disabled={analyzing || !resumeText}
-            style={{
-              background: resumeText ? 'var(--accent)' : 'var(--surface-2)',
-              color: resumeText ? '#000' : 'var(--text-muted)',
-              border: 'none',
-              borderRadius: 4,
-              padding: '12px 16px',
-              cursor: analyzing || !resumeText ? 'not-allowed' : 'pointer',
-              fontSize: 12,
-              fontWeight: 700,
-              fontFamily: 'inherit',
-              letterSpacing: '0.05em',
-              opacity: analyzing ? 0.7 : 1,
-            }}
-          >
-            {analyzing ? '▸ Analyzing...' : '▸ Run Analysis'}
-          </button>
-
-          {error && (
-            <div style={{
-              display: 'flex',
-              gap: 6,
-              padding: '8px 10px',
-              background: 'rgba(239, 68, 68, 0.1)',
-              borderRadius: 4,
-              border: '1px solid rgba(239, 68, 68, 0.2)',
-            }}>
-              <AlertCircle size={12} color="var(--red)" style={{ marginTop: 1, flexShrink: 0 }} />
-              <span style={{ fontSize: 11, color: 'var(--red)' }}>{error}</span>
-            </div>
-          )}
-
-          {/* Cost indicator */}
+          {/* Scrollable inputs */}
           <div style={{
-            marginTop: 'auto',
-            padding: '10px 12px',
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: 6,
+            flex: 1,
+            padding: '16px 16px 0',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 20,
+            overflowY: 'auto',
           }}>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              API Usage
+            {/* Resume section */}
+            <div>
+              <div style={SECTION_LABEL}>Resume</div>
+
+              {!resumeText && !pasteMode && (
+                <>
+                  <ResumeUpload
+                    onTextExtracted={handleTextExtracted}
+                    fileName={resumeFileName}
+                    hasResume={false}
+                    onClear={() => { setResumeText(''); setResumeFileName(''); setLocalScore(null); setJdMatch(null); }}
+                  />
+                  <button
+                    onClick={() => setPasteMode(true)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 10, fontFamily: 'inherit', marginTop: 8, padding: 0, letterSpacing: '0.04em' }}
+                  >
+                    paste text instead →
+                  </button>
+                </>
+              )}
+
+              {!resumeText && pasteMode && (
+                <>
+                  <textarea
+                    style={{ ...inputStyle, height: 140, resize: 'vertical', fontSize: 11, lineHeight: 1.5 }}
+                    value={resumeText}
+                    onChange={e => setResumeText(e.target.value)}
+                    placeholder="Paste resume text here..."
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => setPasteMode(false)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 10, fontFamily: 'inherit', marginTop: 6, padding: 0, letterSpacing: '0.04em' }}
+                  >
+                    ← upload file instead
+                  </button>
+                </>
+              )}
+
+              {resumeText && (
+                <ResumeUpload
+                  onTextExtracted={handleTextExtracted}
+                  fileName={resumeFileName || 'Pasted text'}
+                  hasResume={true}
+                  onClear={() => { setResumeText(''); setResumeFileName(''); setLocalScore(null); setJdMatch(null); setPasteMode(false); }}
+                />
+              )}
             </div>
-            {[
-              { label: 'Local scoring', cost: 'Free', active: true },
-              { label: 'JD matching', cost: '~$0.01', active: !!jobDescription },
-              { label: 'Bullet rewrites', cost: '~$0.02', active: false },
-              { label: 'Interview guide', cost: '~$0.04', active: false },
-              { label: 'TMAY pitch', cost: '~$0.01', active: false },
-            ].map(item => (
-              <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                <span style={{ fontSize: 10, color: item.active ? 'var(--text-dim)' : 'var(--text-muted)' }}>{item.label}</span>
-                <span style={{ fontSize: 10, color: item.cost === 'Free' ? 'var(--green)' : 'var(--text-muted)' }}>{item.cost}</span>
+
+            {/* Job Target section */}
+            <div>
+              <div style={SECTION_LABEL}>Job Target</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <input
+                  style={inputStyle}
+                  value={jobTitle}
+                  onChange={e => setJobTitle(e.target.value)}
+                  placeholder="Job title"
+                />
+                <input
+                  style={inputStyle}
+                  value={companyName}
+                  onChange={e => setCompanyName(e.target.value)}
+                  placeholder="Company"
+                />
+                <textarea
+                  style={{ ...inputStyle, height: 100, resize: 'vertical', lineHeight: 1.5 }}
+                  value={jobDescription}
+                  onChange={e => setJobDescription(e.target.value)}
+                  placeholder="Job description — optional, enables JD match"
+                />
               </div>
-            ))}
+            </div>
+          </div>
+
+          {/* Pinned bottom — CTA + cost */}
+          <div style={{
+            padding: 16,
+            borderTop: '1px solid var(--border)',
+            background: 'var(--bg)',
+            flexShrink: 0,
+          }}>
+            {error && (
+              <div style={{
+                display: 'flex',
+                gap: 6,
+                padding: '7px 9px',
+                background: 'rgba(239, 68, 68, 0.08)',
+                borderRadius: 4,
+                border: '1px solid rgba(239, 68, 68, 0.15)',
+                marginBottom: 10,
+              }}>
+                <AlertCircle size={11} color="var(--red)" style={{ marginTop: 1, flexShrink: 0 }} />
+                <span style={{ fontSize: 10, color: 'var(--red)', lineHeight: 1.5 }}>{error}</span>
+              </div>
+            )}
+
+            <button
+              onClick={handleAnalyze}
+              disabled={!canAnalyze}
+              style={{
+                width: '100%',
+                background: canAnalyze ? 'var(--accent)' : 'var(--surface-2)',
+                color: canAnalyze ? '#000' : 'var(--text-muted)',
+                border: 'none',
+                borderRadius: 4,
+                padding: '11px 16px',
+                cursor: canAnalyze ? 'pointer' : 'not-allowed',
+                fontSize: 12,
+                fontWeight: 700,
+                fontFamily: 'inherit',
+                letterSpacing: '0.06em',
+                marginBottom: 12,
+                transition: 'background 0.15s ease, color 0.15s ease',
+              }}
+            >
+              {analyzing ? '▸ Analyzing...' : '▸ Run Analysis'}
+            </button>
+
+            {/* Compact cost legend */}
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {[
+                { label: 'Score', cost: 'free' },
+                { label: 'JD', cost: '$0.01' },
+                { label: 'Rewrites', cost: '$0.02' },
+                { label: 'Guide', cost: '$0.04' },
+                { label: 'Pitch', cost: '$0.01' },
+              ].map(item => (
+                <div key={item.label} style={{ display: 'flex', gap: 3, alignItems: 'baseline' }}>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)', letterSpacing: '0.06em' }}>{item.label}</span>
+                  <span style={{ fontSize: 9, color: item.cost === 'free' ? 'var(--green)' : 'var(--text-muted)' }}>{item.cost}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </aside>
 
         {/* Right panel — results */}
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {/* Tabs */}
-          {hasResults && (
-            <div style={{
-              borderBottom: '1px solid var(--border)',
-              padding: '0 24px',
-              display: 'flex',
-              gap: 0,
-              flexShrink: 0,
-            }}>
-              {TABS.map(tab => (
+          {/* Tabs — always visible */}
+          <div style={{
+            borderBottom: '1px solid var(--border)',
+            padding: '0 16px',
+            display: 'flex',
+            gap: 0,
+            flexShrink: 0,
+          }}>
+            {TABS.map(tab => {
+              const needsResults = tab.id === 'score' || tab.id === 'bullets';
+              const isDisabled = needsResults && !hasResults;
+              const isActive = activeTab === tab.id;
+              return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => !isDisabled && setActiveTab(tab.id)}
                   style={{
                     background: 'none',
                     border: 'none',
-                    borderBottom: `2px solid ${activeTab === tab.id ? 'var(--accent)' : 'transparent'}`,
-                    padding: '12px 16px',
-                    cursor: 'pointer',
-                    color: activeTab === tab.id ? 'var(--accent)' : 'var(--text-muted)',
-                    fontSize: 11,
+                    borderBottom: `2px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
+                    padding: '10px 12px',
+                    cursor: isDisabled ? 'default' : 'pointer',
+                    color: isActive ? 'var(--accent)' : isDisabled ? 'var(--text-muted)' : 'var(--text-dim)',
+                    fontSize: 10,
                     fontFamily: 'inherit',
                     textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
+                    letterSpacing: '0.1em',
                     display: 'flex',
                     alignItems: 'center',
                     gap: 6,
+                    opacity: isDisabled ? 0.4 : 1,
                     transition: 'color 0.1s ease',
                   }}
                 >
                   {tab.icon}
                   {tab.label}
                 </button>
-              ))}
-            </div>
-          )}
+              );
+            })}
+          </div>
 
           {/* Content */}
           <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
-            {!hasResults && (
-              <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '100%',
-                gap: 16,
-                color: 'var(--text-muted)',
-              }}>
-                <Target size={40} color="var(--border)" />
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 13, marginBottom: 6 }}>Upload your resume and run analysis</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    Local scoring is instant and free. JD matching uses one Claude call.
-                  </div>
-                </div>
-              </div>
+            {!hasResults && (activeTab === 'score' || activeTab === 'bullets') && (
+              <EmptyState hasResume={!!resumeText} hasJD={!!jobDescription} />
             )}
 
             {hasResults && activeTab === 'score' && (
@@ -393,6 +438,78 @@ export default function Dashboard() {
             )}
           </div>
         </main>
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ hasResume, hasJD }: { hasResume: boolean; hasJD: boolean }) {
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: '100%',
+      gap: 32,
+    }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{
+          width: 48,
+          height: 48,
+          borderRadius: '50%',
+          border: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          margin: '0 auto 16px',
+        }}>
+          <Target size={20} color="var(--text-muted)" />
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 4 }}>
+          {!hasResume ? 'Add your resume to begin' : !hasJD ? 'Add a job description for full scoring' : 'Run analysis when ready'}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          Local scoring is instant. JD matching uses one Claude call.
+        </div>
+      </div>
+
+      {/* What you'll get */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, 1fr)',
+        gap: 8,
+        maxWidth: 440,
+        width: '100%',
+      }}>
+        {[
+          { label: 'XYZ Score', desc: 'Every bullet checked for result + metric + action', free: true },
+          { label: 'JD Overlap', desc: '5–7 direct requirements matched to your experience', free: false },
+          { label: 'Metric Density', desc: 'Flags sections below the 7/10 threshold', free: true },
+          { label: 'Anti-AI Check', desc: '25+ banned tropes detected and flagged', free: true },
+          { label: 'Scannability', desc: 'Summary length, page count, critical keywords', free: true },
+          { label: 'Bullet Rewrites', desc: 'Weak bullets rewritten with active verbs + numbers', free: false },
+        ].map((item, i) => (
+          <div key={i} style={{
+            padding: '12px 14px',
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 6,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>{item.label}</span>
+              <span style={{
+                fontSize: 9,
+                color: item.free ? 'var(--green)' : 'var(--text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+              }}>
+                {item.free ? 'free' : 'api'}
+              </span>
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}>{item.desc}</div>
+          </div>
+        ))}
       </div>
     </div>
   );
