@@ -1,8 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import type { InterviewGuide as GuideType } from '@/lib/claude';
 import { Copy, ChevronDown, ChevronRight, User, MessageSquare } from 'lucide-react';
+
+const InterviewGuidePDFButton = dynamic(() => import('./InterviewGuidePDF'), { ssr: false });
 
 interface Props {
   guide: GuideType | null;
@@ -15,6 +18,9 @@ export default function InterviewGuide({ guide, resumeText, onGenerate, generati
   const [linkedIn, setLinkedIn] = useState('');
   const [targetRole, setTargetRole] = useState('');
   const [companyName, setCompanyName] = useState('');
+  // Track submitted values for PDF export
+  const [submittedRole, setSubmittedRole] = useState('');
+  const [submittedCompany, setSubmittedCompany] = useState('');
   const [expanded, setExpanded] = useState<Set<number>>(new Set([0]));
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
@@ -92,7 +98,7 @@ export default function InterviewGuide({ guide, resumeText, onGenerate, generati
             />
           </div>
           <button
-            onClick={() => onGenerate({ interviewerLinkedIn: linkedIn, targetRole, companyName })}
+            onClick={() => { setSubmittedRole(targetRole); setSubmittedCompany(companyName); onGenerate({ interviewerLinkedIn: linkedIn, targetRole, companyName }); }}
             disabled={generating || !resumeText || !targetRole || !companyName}
             style={{
               background: 'var(--accent)',
@@ -127,9 +133,18 @@ export default function InterviewGuide({ guide, resumeText, onGenerate, generati
             alignItems: 'flex-start',
           }}>
             <User size={20} color="var(--text-muted)" style={{ marginTop: 2 }} />
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{guide.interviewerName}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{guide.interviewerTitle}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{guide.interviewerName}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{guide.interviewerTitle}</div>
+                </div>
+                <InterviewGuidePDFButton
+                  guide={guide}
+                  targetRole={submittedRole || targetRole}
+                  companyName={submittedCompany || companyName}
+                />
+              </div>
               {guide.openingContext && (
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.6 }}>{guide.openingContext}</div>
               )}
